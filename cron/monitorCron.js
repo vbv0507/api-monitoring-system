@@ -1,18 +1,36 @@
-const cron = require('node-cron');
+const cron = require("node-cron");
 
-const Monitor = require('../models/Monitor');
+const Monitor = require("../models/Monitor");
 
-const checkMonitor = require('../services/checkMonitor');
+const checkMonitor = require("../services/checkMonitor");
 
-cron.schedule('* * * * *', async () => {
+function isMonitorDue(monitor, now) {
+  if (!monitor.lastChecked) {
+    return true;
+  }
 
-    console.log('Running monitor checks...');
+  const interval = Number(monitor.interval || 60000);
+  const nextCheckTime = new Date(monitor.lastChecked).getTime() + interval;
 
+  return nextCheckTime <= now.getTime();
+}
+
+cron.schedule("*/10 * * * * *", async () => {
+  try {
+    const now = new Date();
     const monitors = await Monitor.find();
+    const dueMonitors = monitors.filter((monitor) => isMonitorDue(monitor, now));
 
-    for (const monitor of monitors) {
-
-        await checkMonitor(monitor);
-
+    if (!dueMonitors.length) {
+      return;
     }
+
+    console.log(`Running ${dueMonitors.length} due monitor check(s)...`);
+
+    for (const monitor of dueMonitors) {
+      await checkMonitor(monitor);
+    }
+  } catch (error) {
+    console.log("Monitor cron error:", error.message);
+  }
 });
