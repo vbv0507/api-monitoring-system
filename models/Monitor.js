@@ -21,6 +21,10 @@ const monitorSchema = new mongoose.Schema(
       enum: ["UP", "DOWN"],
       default: "UP",
     },
+    statusCode: {
+      type: Number,
+      default: 0,
+    },
     responseTime: {
       type: Number,
       default: 0,
