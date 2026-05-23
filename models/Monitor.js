@@ -41,6 +41,15 @@ const monitorSchema = new mongoose.Schema(
     lastChecked: {
       type: Date,
     },
+    totalChecks: {
+      type: Number,
+      default: 0,
+    },
+
+    successfulChecks: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true },
 );

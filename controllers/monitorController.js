@@ -28,12 +28,19 @@ async function deleteMonitor(req, res) {
       _id: req.params.id,
       user: req.user._id,
     });
+
     if (!monitor) {
       return res
         .status(404)
         .json({ success: false, message: "Monitor not found" });
     }
-    res.status(200).json({ success: true, message: "Monitor deleted" });
+
+    await Log.deleteMany({ monitor: monitor._id });
+
+    res.status(200).json({
+      success: true,
+      message: "Monitor and logs deleted",
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }

@@ -3,9 +3,14 @@ const axios = require("axios");
 const Monitor = require("../models/Monitor");
 const Log = require("../models/MonitorLog");
 
+const sendEmail = require("./sendEmail");
+
 async function checkMonitor(monitor) {
 
   const start = Date.now();
+
+  // STORE PREVIOUS STATUS
+  const previousStatus = monitor.status;
 
   try {
 
@@ -17,15 +22,35 @@ async function checkMonitor(monitor) {
       validateStatus: () => true,
     });
 
+    // TOTAL CHECKS
+    monitor.totalChecks += 1;
+
     // STATUS CHECK
     if (response.status >= 400) {
 
       monitor.status = "DOWN";
+
       monitor.failureCount += 1;
+
+      // SEND EMAIL ONLY WHEN STATUS CHANGES
+      if (previousStatus !== "DOWN") {
+
+        await monitor.populate("user");
+
+        await sendEmail({
+          to: monitor.user.email,
+          subject: "🚨 API DOWN ALERT",
+          text: `${monitor.url} is currently DOWN.\nStatus Code: ${response.status}`,
+        });
+
+      }
 
     } else {
 
       monitor.status = "UP";
+
+      // SUCCESSFUL CHECKS
+      monitor.successfulChecks += 1;
 
       // RESET FAILURES
       monitor.failureCount = 0;
@@ -36,7 +61,9 @@ async function checkMonitor(monitor) {
 
     // UPDATE MONITOR
     monitor.responseTime = responseTime;
+
     monitor.lastChecked = new Date();
+
     monitor.statusCode = response.status;
 
     await monitor.save();
@@ -55,6 +82,9 @@ async function checkMonitor(monitor) {
 
   } catch (error) {
 
+    // TOTAL CHECKS
+    monitor.totalChecks += 1;
+
     monitor.status = "DOWN";
 
     monitor.failureCount += 1;
@@ -72,6 +102,19 @@ async function checkMonitor(monitor) {
       statusCode: monitor.statusCode,
       responseTime: 0,
     });
+
+    // SEND EMAIL ONLY WHEN STATUS CHANGES
+    if (previousStatus !== "DOWN") {
+
+      await monitor.populate("user");
+
+      await sendEmail({
+        to: monitor.user.email,
+        subject: "🚨 API DOWN ALERT",
+        text: `${monitor.url} is currently DOWN.`,
+      });
+
+    }
 
     console.log(`${monitor.url} is DOWN`);
   }
