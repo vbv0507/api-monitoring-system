@@ -1,9 +1,28 @@
 const axios = require("axios");
+const { getIO } = require("../socket");
 
 const Monitor = require("../models/Monitor");
 const Log = require("../models/MonitorLog");
 
 const sendEmail = require("./sendEmail");
+
+function emitMonitorStatus(monitor) {
+  const userId = String(monitor.user && monitor.user._id ? monitor.user._id : monitor.user);
+
+  getIO().to(userId).emit("monitor-status", {
+    _id: monitor._id,
+    url: monitor.url,
+    method: monitor.method,
+    interval: monitor.interval,
+    status: monitor.status,
+    statusCode: monitor.statusCode,
+    responseTime: monitor.responseTime,
+    failureCount: monitor.failureCount,
+    totalChecks: monitor.totalChecks,
+    successfulChecks: monitor.successfulChecks,
+    lastChecked: monitor.lastChecked,
+  });
+}
 
 async function checkMonitor(monitor) {
 
@@ -76,6 +95,8 @@ async function checkMonitor(monitor) {
       responseTime: monitor.responseTime,
     });
 
+    emitMonitorStatus(monitor);
+
     console.log(
       `${monitor.url} ${monitor.status} (${response.status})`
     );
@@ -102,6 +123,8 @@ async function checkMonitor(monitor) {
       statusCode: monitor.statusCode,
       responseTime: 0,
     });
+
+    emitMonitorStatus(monitor);
 
     // SEND EMAIL ONLY WHEN STATUS CHANGES
     if (previousStatus !== "DOWN") {

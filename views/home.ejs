@@ -21,6 +21,7 @@
         };
     </script>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+    <script src="/socket.io/socket.io.js"></script>
 </head>
 <body class="min-h-screen bg-[#f4f7f5] font-sans text-slate-950 antialiased">
     <main class="min-h-screen">
@@ -303,6 +304,7 @@
         const logsList = document.getElementById("logsList");
         const closeLogsBtn = document.getElementById("closeLogsBtn");
         let currentMonitors = [];
+        let socketClient = null;
 
         function refreshIcons() {
             if (window.lucide) {
@@ -320,6 +322,42 @@
 
         function clearToken() {
             localStorage.removeItem("api_monitor_token");
+        }
+
+        function connectSocket() {
+            const token = getToken();
+            if (!token || socketClient || !window.io) return;
+
+            socketClient = io({
+                auth: { token },
+            });
+
+            socketClient.on("monitor-status", (monitor) => {
+                const index = currentMonitors.findIndex((item) => item._id === monitor._id);
+
+                if (index === -1) {
+                    loadMonitors();
+                    return;
+                }
+
+                currentMonitors[index] = {
+                    ...currentMonitors[index],
+                    ...monitor,
+                };
+
+                renderMonitors(currentMonitors);
+                updateCounts(currentMonitors);
+            });
+
+            socketClient.on("connect_error", () => {
+                socketClient = null;
+            });
+        }
+
+        function disconnectSocket() {
+            if (!socketClient) return;
+            socketClient.disconnect();
+            socketClient = null;
         }
 
         function showMessage(message, type = "success") {
@@ -379,7 +417,10 @@
             dashboardSection.classList.toggle("hidden", !loggedIn);
 
             if (loggedIn) {
+                connectSocket();
                 loadMonitors();
+            } else {
+                disconnectSocket();
             }
 
             refreshIcons();
