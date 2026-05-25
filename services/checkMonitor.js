@@ -1,7 +1,6 @@
 const axios = require("axios");
 const { getIO } = require("../socket");
 
-const Monitor = require("../models/Monitor");
 const Log = require("../models/MonitorLog");
 
 const sendEmail = require("./sendEmail");
@@ -24,12 +23,27 @@ function emitMonitorStatus(monitor) {
   });
 }
 
+async function sendDownAlert(monitor, text) {
+  try {
+    await monitor.populate("user");
+
+    await sendEmail({
+      to: monitor.user.email,
+      subject: "API DOWN ALERT",
+      text,
+    });
+  } catch (error) {
+    console.log("Down alert email error:", error.message);
+  }
+}
+
 async function checkMonitor(monitor) {
 
   const start = Date.now();
 
   // STORE PREVIOUS STATUS
   const previousStatus = monitor.status;
+  let shouldSendDownAlert = false;
 
   try {
 
@@ -51,18 +65,9 @@ async function checkMonitor(monitor) {
 
       monitor.failureCount += 1;
 
-      // SEND EMAIL ONLY WHEN STATUS CHANGES
-      if (previousStatus !== "DOWN") {
-
-        await monitor.populate("user");
-
-        await sendEmail({
-          to: monitor.user.email,
-          subject: "🚨 API DOWN ALERT",
-          text: `${monitor.url} is currently DOWN.\nStatus Code: ${response.status}`,
-        });
-
-      }
+      // SEND EMAIL ONLY ONCE FOR THIS DOWN PERIOD
+      shouldSendDownAlert = previousStatus !== "DOWN" && !monitor.downAlertSent;
+      monitor.downAlertSent = true;
 
     } else {
 
@@ -73,6 +78,9 @@ async function checkMonitor(monitor) {
 
       // RESET FAILURES
       monitor.failureCount = 0;
+
+      // ALLOW A NEW DOWN EMAIL IF API GOES DOWN AGAIN LATER
+      monitor.downAlertSent = false;
     }
 
     // RESPONSE TIME
@@ -86,6 +94,13 @@ async function checkMonitor(monitor) {
     monitor.statusCode = response.status;
 
     await monitor.save();
+
+    if (shouldSendDownAlert) {
+      await sendDownAlert(
+        monitor,
+        `${monitor.url} is currently DOWN.\nStatus Code: ${response.status}`,
+      );
+    }
 
     // SAVE LOG
     await Log.create({
@@ -114,6 +129,10 @@ async function checkMonitor(monitor) {
 
     monitor.statusCode = 0;
 
+    // SEND EMAIL ONLY ONCE FOR THIS DOWN PERIOD
+    shouldSendDownAlert = previousStatus !== "DOWN" && !monitor.downAlertSent;
+    monitor.downAlertSent = true;
+
     await monitor.save();
 
     // SAVE FAILURE LOG
@@ -126,17 +145,8 @@ async function checkMonitor(monitor) {
 
     emitMonitorStatus(monitor);
 
-    // SEND EMAIL ONLY WHEN STATUS CHANGES
-    if (previousStatus !== "DOWN") {
-
-      await monitor.populate("user");
-
-      await sendEmail({
-        to: monitor.user.email,
-        subject: "🚨 API DOWN ALERT",
-        text: `${monitor.url} is currently DOWN.`,
-      });
-
+    if (shouldSendDownAlert) {
+      await sendDownAlert(monitor, `${monitor.url} is currently DOWN.`);
     }
 
     console.log(`${monitor.url} is DOWN`);
