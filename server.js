@@ -52,9 +52,11 @@ app.use(express.urlencoded({ extended: true }));
 // ROUTES
 const monitorRoutes = require('./routes/monitorRoutes');
 const authRoutes = require('./routes/authRoutes');
+const incidentRoutes = require('./routes/incidentRoutes');
 
 app.use('/api/monitors', monitorRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/incidents', incidentRoutes);
 
 
 // TEST ROUTE

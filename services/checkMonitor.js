@@ -2,11 +2,14 @@ const axios = require("axios");
 const { getIO } = require("../socket");
 
 const Log = require("../models/MonitorLog");
+const Incident = require("../models/Incident");
 
 const sendEmail = require("./sendEmail");
 
 function emitMonitorStatus(monitor) {
-  const userId = String(monitor.user && monitor.user._id ? monitor.user._id : monitor.user);
+  const userId = String(
+    monitor.user && monitor.user._id ? monitor.user._id : monitor.user,
+  );
 
   getIO().to(userId).emit("monitor-status", {
     _id: monitor._id,
@@ -38,15 +41,14 @@ async function sendDownAlert(monitor, text) {
 }
 
 async function checkMonitor(monitor) {
-
   const start = Date.now();
 
   // STORE PREVIOUS STATUS
   const previousStatus = monitor.status;
+
   let shouldSendDownAlert = false;
 
   try {
-
     // API REQUEST
     const response = await axios({
       method: monitor.method,
@@ -60,17 +62,23 @@ async function checkMonitor(monitor) {
 
     // STATUS CHECK
     if (response.status >= 400) {
-
       monitor.status = "DOWN";
 
       monitor.failureCount += 1;
 
-      // SEND EMAIL ONLY ONCE FOR THIS DOWN PERIOD
+      // CREATE INCIDENT ONLY ON FIRST FAILURE
+      if (previousStatus !== "DOWN") {
+        await Incident.create({
+          monitor: monitor._id,
+          startedAt: new Date(),
+        });
+      }
+
+      // SEND EMAIL ONLY ONCE
       shouldSendDownAlert = previousStatus !== "DOWN" && !monitor.downAlertSent;
+
       monitor.downAlertSent = true;
-
     } else {
-
       monitor.status = "UP";
 
       // SUCCESSFUL CHECKS
@@ -79,8 +87,27 @@ async function checkMonitor(monitor) {
       // RESET FAILURES
       monitor.failureCount = 0;
 
-      // ALLOW A NEW DOWN EMAIL IF API GOES DOWN AGAIN LATER
+      // ALLOW FUTURE DOWN ALERTS
       monitor.downAlertSent = false;
+
+      // RESOLVE INCIDENT
+      if (previousStatus === "DOWN") {
+        const activeIncident = await Incident.findOne({
+          monitor: monitor._id,
+          status: "OPEN",
+        });
+
+        if (activeIncident) {
+          activeIncident.status = "RESOLVED";
+
+          activeIncident.resolvedAt = new Date();
+
+          activeIncident.duration =
+            activeIncident.resolvedAt - activeIncident.startedAt;
+
+          await activeIncident.save();
+        }
+      }
     }
 
     // RESPONSE TIME
@@ -95,6 +122,7 @@ async function checkMonitor(monitor) {
 
     await monitor.save();
 
+    // SEND ALERT
     if (shouldSendDownAlert) {
       await sendDownAlert(
         monitor,
@@ -110,14 +138,11 @@ async function checkMonitor(monitor) {
       responseTime: monitor.responseTime,
     });
 
+    // REALTIME UPDATE
     emitMonitorStatus(monitor);
 
-    console.log(
-      `${monitor.url} ${monitor.status} (${response.status})`
-    );
-
+    console.log(`${monitor.url} ${monitor.status} (${response.status})`);
   } catch (error) {
-
     // TOTAL CHECKS
     monitor.totalChecks += 1;
 
@@ -129,8 +154,17 @@ async function checkMonitor(monitor) {
 
     monitor.statusCode = 0;
 
-    // SEND EMAIL ONLY ONCE FOR THIS DOWN PERIOD
+    // CREATE INCIDENT ONLY ON FIRST FAILURE
+    if (previousStatus !== "DOWN") {
+      await Incident.create({
+        monitor: monitor._id,
+        startedAt: new Date(),
+      });
+    }
+
+    // SEND EMAIL ONLY ONCE
     shouldSendDownAlert = previousStatus !== "DOWN" && !monitor.downAlertSent;
+
     monitor.downAlertSent = true;
 
     await monitor.save();
@@ -143,8 +177,10 @@ async function checkMonitor(monitor) {
       responseTime: 0,
     });
 
+    // REALTIME UPDATE
     emitMonitorStatus(monitor);
 
+    // SEND ALERT
     if (shouldSendDownAlert) {
       await sendDownAlert(monitor, `${monitor.url} is currently DOWN.`);
     }
